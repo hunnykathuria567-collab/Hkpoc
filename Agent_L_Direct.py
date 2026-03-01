@@ -129,31 +129,44 @@ def save_lead_to_csv(lead_data, filename="Agent_L_Corporate_Loans.csv"):
         writer.writerow(lead_data)
 
 def push_to_telegram(lead_data):
-    # CHANGED: Now using your existing Homologation bot credentials
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-    if not bot_token or not chat_id: return
+    
+    if not bot_token or not chat_id: 
+        print("❌ ERROR: Telegram Bot Token or Chat ID is MISSING from the environment!")
+        return
     
     if lead_data['company_name'] == "No New SME Potential Found":
         message = (
-            f"🟢 *AGENT L: SYSTEM HEARTBEAT* 🟢\n\n"
-            f"*{lead_data['company_name']}*\n"
+            f"🟢 AGENT L: SYSTEM HEARTBEAT 🟢\n\n"
+            f"{lead_data['company_name']}\n"
             f"Status: {lead_data['proxy_signal']}"
         )
     else:
         message = (
-            f"🏦 *AGENT L: NEW TARGET ACQUIRED (>₹1Cr)* 🏦\n"
-            f"🏢 *Company:* {lead_data['company_name']}\n"
-            f"🎯 *Target:* {lead_data['target_type']} ({lead_data['complete_name']})\n"
-            f"📞 *Contact:* {lead_data['contact_number']}\n"
-            f"✉️ *Email:* {lead_data['email']}\n"
-            f"📍 *Location:* {lead_data['office_address']}\n\n"
-            f"📡 *Signal:* {lead_data['proxy_signal']}\n"
-            f"💰 *Need:* {lead_data['capital_need']}\n"
-            f"♟️ *Play:* {lead_data['the_play']}"
+            f"🏦 AGENT L: NEW TARGET ACQUIRED (>1Cr) 🏦\n"
+            f"🏢 Company: {lead_data['company_name']}\n"
+            f"🎯 Target: {lead_data['target_type']} ({lead_data['complete_name']})\n"
+            f"📞 Contact: {lead_data['contact_number']}\n"
+            f"✉️ Email: {lead_data['email']}\n"
+            f"📍 Location: {lead_data['office_address']}\n\n"
+            f"📡 Signal: {lead_data['proxy_signal']}\n"
+            f"💰 Need: {lead_data['capital_need']}\n"
+            f"♟️ Play: {lead_data['the_play']}"
         )
+    
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    requests.post(url, json={"chat_id": chat_id, "text": message, "parse_mode": "Markdown"})
+    
+    # DIAGNOSTIC: Try sending with Markdown first. If it fails, print the error and send plain text.
+    print(f"   📲 Attempting to push {lead_data['company_name']} to Telegram...")
+    try:
+        response = requests.post(url, json={"chat_id": chat_id, "text": message})
+        if response.status_code == 200:
+            print("   ✅ Telegram delivery successful!")
+        else:
+            print(f"   ❌ Telegram API Error [{response.status_code}]: {response.text}")
+    except Exception as e:
+        print(f"   ❌ Telegram Request Failed completely: {e}")
 
 def push_dummy_lead():
     dummy_lead = {
