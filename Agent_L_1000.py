@@ -15,10 +15,10 @@ class SignalList(BaseModel):
     companies: list[CompanySignal]
 
 class FinanceContact(BaseModel):
-    role: str
-    name: str
-    phone: str
-    email: str
+    role: str = Field(description="CFO, Accountant, or Finance Lead")
+    name: str = Field(description="Full name")
+    phone: str = Field(description="Extracted phone/mobile")
+    email: str = Field(description="Extracted corporate email")
 
 class EnrichedLead(BaseModel):
     company_name: str
@@ -28,65 +28,66 @@ class EnrichedLead(BaseModel):
     the_play: str
     source_link: str
 
+class ContactInfo(BaseModel):
+    contacts: list[FinanceContact]
+
 # -------------------------------------------------------------------
-# PHASE 1: MULTI-STREAM SCAN
+# PHASE 1: TARGET ACQUISITION (MULTI-STREAM)
 # -------------------------------------------------------------------
 def get_company_signals():
     api_key = os.environ.get("SERPER_API_KEY")
     url = "https://google.serper.dev/search"
     queries = [
-        "\"Pvt Ltd\" wins contract Delhi NCR 2026",
-        "\"Pvt Ltd\" NCLT Delhi petition March 2026",
-        "\"Pvt Ltd\" factory expansion Haryana Punjab 2026"
+        "\"Pvt Ltd\" wins contract Delhi NCR Haryana Punjab",
+        "\"Pvt Ltd\" NCLT Delhi expansion petition 2026",
+        "\"Pvt Ltd\" bags order machinery factory setup North India"
     ]
     all_snippets = []
-    print(f"🌍 Phase 1: Scanning for high-value targets...")
+    print("🌍 Phase 1: Scanning 350km radius for high-intent signals...")
     for q in queries:
         try:
             res = requests.post(url, headers={'X-API-KEY': api_key, 'Content-Type': 'application/json'}, 
-                                json={"q": q, "num": 40, "tbs": "qdr:m"})
+                                json={"q": q, "num": 30, "tbs": "qdr:m"})
             all_snippets.extend([f"Co: {r.get('title')} | Snip: {r.get('snippet')} | Link: {r.get('link')}" for r in res.json().get('organic', [])])
         except Exception: continue
 
     if not all_snippets: return []
     client = genai.Client()
-    prompt = f"Identify up to 20 companies from these snippets involved in >1Cr deals. Output JSON list. Snippets:\n" + "\n".join(all_snippets)
+    prompt = f"Identify the top 15 companies from these snippets involved in >1Cr deals. Output JSON list. Snippets:\n" + "\n".join(all_snippets)
     try:
         ai_res = client.models.generate_content(model='gemini-2.5-flash', contents=prompt, config=genai.types.GenerateContentConfig(response_mime_type="application/json", response_schema=SignalList))
         return json.loads(ai_res.text).get("companies", [])
     except Exception: return []
 
 # -------------------------------------------------------------------
-# PHASE 2: DEEP DIVE & ENRICHMENT
+# PHASE 2: FALLBACK ENRICHMENT (SNIPER MODE)
 # -------------------------------------------------------------------
-def enrich_company(co_data):
+def deep_enrich_strike_team(company_name, original_signal):
     api_key = os.environ.get("SERPER_API_KEY")
-    co_name = co_data['name']
     url = "https://google.serper.dev/search"
-    payload = json.dumps({"q": f'"{co_name}" (CFO OR Accountant OR "Finance Manager") (contact OR phone OR email)', "num": 10})
+    print(f"   🔍 Fallback: Sniper-searching contact info for {company_name}...")
+    
+    # Specific dork to find CFO/Accountant contact info
+    q = f'"{company_name}" (CFO OR Accountant OR "Finance Head") (contact OR phone OR email OR mobile)'
     try:
-        res = requests.post(url, headers={'X-API-KEY': api_key, 'Content-Type': 'application/json'}, data=payload)
-        deep_text = "\n".join([r.get('snippet') for r in res.json().get('organic', [])])
+        res = requests.post(url, headers={'X-API-KEY': api_key, 'Content-Type': 'application/json'}, json={"q": q, "num": 10})
+        snippets = "\n".join([r.get('snippet') for r in res.json().get('organic', [])])
+        
         client = genai.Client()
-        prompt = f"Extract Strike Team (CFO, Accountant, Finance Lead) for {co_name}. Use 'Not Listed' if missing. Results:\n{deep_text}"
+        prompt = f"Using these snippets, find the Name, Phone, and Email for the CFO, Accountant, and Finance Lead of {company_name}. If missing, search patterns like '981...' or '@co.com'. Results:\n{snippets}"
         ai_res = client.models.generate_content(model='gemini-2.5-flash', contents=prompt, config=genai.types.GenerateContentConfig(response_mime_type="application/json", response_schema=EnrichedLead))
-        result = json.loads(ai_res.text)
-        result['source_link'] = co_data['source']
-        return result
+        return json.loads(ai_res.text)
     except Exception: return None
 
 # -------------------------------------------------------------------
-# TELEGRAM DOCUMENT DISPATCH
+# DELIVERY: EXCEL DISPATCH
 # -------------------------------------------------------------------
 def send_excel_to_telegram(file_path):
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-    if not os.path.exists(file_path): return
-    
     url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
-    print(f"📤 Dispatching 1,000 Row Limit Master List to Telegram...")
     with open(file_path, 'rb') as file:
-        requests.post(url, data={'chat_id': chat_id, 'caption': "🏦 AGENT L: Verified SME Finance Leads (Bulk Export)"}, files={'document': file})
+        requests.post(url, data={'chat_id': chat_id, 'caption': "📊 AGENT L: Master Lead Database (1,000 Row Limit)"}, files={'document': file})
 
 # -------------------------------------------------------------------
 # MAIN ORCHESTRATION
@@ -96,28 +97,28 @@ if __name__ == "__main__":
     leads_for_excel = []
     
     if signals:
-        for co in signals:
-            full_lead = enrich_company(co)
+        for co in signals[:10]:
+            full_lead = deep_enrich_strike_team(co['name'], co['signal'])
             if full_lead:
-                # Flattening Strike Team for Excel Rows
                 row = {
-                    "Company": full_lead['company_name'],
-                    "Capital Need": full_lead['capital_need'],
-                    "The Play": full_lead['the_play'],
-                    "Address": full_lead['address'],
-                    "Source Link": full_lead['source_link']
+                    "Company": full_lead.get('company_name', co['name']),
+                    "Signal": co['signal'],
+                    "Estimated Need": full_lead.get('capital_need', 'Est. >1Cr'),
+                    "Pitch": full_lead.get('the_play', 'N/A'),
+                    "Address": full_lead.get('address', 'N/A'),
+                    "Source": co['source']
                 }
-                # Add up to 3 contacts to the same row
+                # Mapping the Strike Team members to columns
                 for i, member in enumerate(full_lead.get('strike_team', [])[:3]):
-                    row[f"Target_{i+1}_Role"] = member['role']
-                    row[f"Target_{i+1}_Name"] = member['name']
-                    row[f"Target_{i+1}_Phone"] = member['phone']
-                
+                    row[f"Target_{i+1}_Role"] = member.get('role', 'N/A')
+                    row[f"Target_{i+1}_Name"] = member.get('name', 'N/A')
+                    row[f"Target_{i+1}_Phone"] = member.get('phone', 'N/A')
+                    row[f"Target_{i+1}_Email"] = member.get('email', 'N/A')
                 leads_for_excel.append(row)
 
-    # 1,000 Row Limit Enforcement & Excel Creation
+    # Database Maintenance (1,000 Row Limit)
     df_new = pd.DataFrame(leads_for_excel)
-    file_name = "Agent_L_Master_Leads.xlsx"
+    file_name = "Agent_L_StrikeTeam_Master.xlsx"
     
     if os.path.exists(file_name):
         df_old = pd.read_excel(file_name)
@@ -125,9 +126,8 @@ if __name__ == "__main__":
     else:
         df_final = df_new.tail(1000)
 
-    df_final.to_excel(file_name, index=False)
-    
     if not df_final.empty:
+        df_final.to_excel(file_name, index=False)
         send_excel_to_telegram(file_name)
     else:
-        print("No new leads found to update Excel.")
+        print("No new signals found today.")
