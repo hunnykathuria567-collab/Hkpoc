@@ -2,7 +2,7 @@ name: Agent L - Corporate Loan Engine
 
 on:
   schedule:
-    - cron: '00 12 * * *' # Runs every day
+    - cron: '00 12 * * *'
   workflow_dispatch:
 
 jobs:
@@ -26,7 +26,15 @@ jobs:
       - name: Run Agent L Direct Client Engine
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          TELEGRAM_BOT_TOKEN_L: ${{ secrets.TELEGRAM_BOT_TOKEN_L }}
-          TELEGRAM_CHAT_ID_L: ${{ secrets.TELEGRAM_CHAT_ID_L }}
+          # CHANGED: Now using your main Agent P credentials so it routes to your phone
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
         run: python Agent_L_Direct.py
+
+      - name: Rescue the Master Database (Artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Agent-L-Corporate-Loans-Database
+          path: Agent_L_Corporate_Loans.csv
+          retention-days: 90
