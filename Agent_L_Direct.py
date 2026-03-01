@@ -38,11 +38,11 @@ def fetch_loan_signals():
     print("🌍 Phase 1: Scanning 350km Radius (Expansions, Tenders, Corporate Finance)...")
     url = "https://google.serper.dev/search"
     
-    # V5 Payload: Broad net for Execution Capital (Contracts) & CapEx (Factories)
+    # V6 Payload: Corrected Syntax + 1 Year Pipeline Flush
     payload = json.dumps({
-      "q": "('bags order' OR 'wins contract' OR 'setting up new facility' OR 'expanding capacity' OR 'project finance' OR 'debt syndication' OR 'fund raising') AND ('Pvt Ltd' OR 'Limited' OR 'manufacturing' OR 'EPC') AND ('Delhi' OR 'Haryana' OR 'Punjab' OR 'UP' OR 'Rajasthan' OR 'Chandigarh' OR 'Ludhiana' OR 'Jaipur' OR 'Noida' OR 'Gurugram') -'personal loan' -'mudra' -'credit card'",
+      "q": '("Pvt Ltd" OR "Limited" OR "EPC") AND ("wins contract" OR "bags order" OR "new facility" OR "expansion" OR "debt syndication") AND (Delhi OR Haryana OR Punjab OR UP OR Rajasthan OR Noida)',
       "num": 40, 
-      "tbs": "qdr:m" # Last 30 days ONLY
+      "tbs": "qdr:y" # Temporarily expanded to 1 year to guarantee a pipeline flush
     })
     
     headers = {'X-API-KEY': api_key, 'Content-Type': 'application/json'}
@@ -129,8 +129,9 @@ def save_lead_to_csv(lead_data, filename="Agent_L_Corporate_Loans.csv"):
         writer.writerow(lead_data)
 
 def push_to_telegram(lead_data):
-    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN_L")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID_L")
+    # CHANGED: Now using your existing Homologation bot credentials
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if not bot_token or not chat_id: return
     
     if lead_data['company_name'] == "No New SME Potential Found":
@@ -174,7 +175,7 @@ def push_dummy_lead():
 # ORCHESTRATION 
 # -------------------------------------------------------------------
 if __name__ == "__main__":
-    print("=== INITIALIZING AGENT L (350KM V5 ENGINE) ===\n")
+    print("=== INITIALIZING AGENT L (350KM V6 ENGINE - YOUR PHONE) ===\n")
     raw_data = fetch_loan_signals()
     
     if raw_data:
