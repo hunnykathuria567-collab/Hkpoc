@@ -105,3 +105,6 @@ if __name__ == "__main__":
     if not df_final.empty:
         df_final.to_excel(file_name, index=False)
         send_excel_to_telegram(file_name)
+    import pandas as pd
+    pd.DataFrame([{'Status': 'Debug Success'}]).to_excel('Agent_L_Master.xlsx')
+
