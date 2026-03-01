@@ -44,14 +44,13 @@ def fetch_loan_signals():
     })
     headers = {'X-API-KEY': api_key, 'Content-Type': 'application/json'}
     
-    try:
-        response = requests.post(url, headers=headers, data=payload)
-        response.raise_for_status()
-        results = response.json().get('organic', [])
-        return "\n".join([f"- {r.get('title')}: {r.get('snippet')}" for r in results])
-    except Exception as e:
-        print(f"Deep Search Error: {e}")
-        return ""
+    # V2 Broader Payload: Opening up to all of Delhi NCR and broadening financial terms
+    payload = json.dumps({
+      "q": "('debt syndication' OR 'fund raising' OR 'working capital' OR 'corporate loan' OR 'capex') AND ('Finance' OR CFO OR 'expansion' OR MSME) AND ('Delhi' OR 'Delhi NCR' OR 'Gurugram' OR 'Noida' OR 'Faridabad')",
+      "num": 40, # Scanning 40 Google pages now instead of 30
+      "tbs": "qdr:y" # TEMPORARY TEST: Expanding to the last 1 year of news to guarantee a hit
+    })
+
 
 # -------------------------------------------------------------------
 # 3. INTELLIGENCE 1: EXTRACT TARGETS
