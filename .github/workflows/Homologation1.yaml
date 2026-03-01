@@ -1,21 +1,39 @@
-name: Agent P - Homologation Lead Gen1
+name: Agent P - Homologation Lead Gen
+
 on:
   schedule:
     - cron: '45 11 * * *'
   workflow_dispatch:
+
 jobs:
   execute_tap:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - run: |
+
+      - name: Install Dependencies
+        run: |
           python -m pip install --upgrade pip
           pip install requests google-genai pydantic
-      - env:
+
+      - name: Run Agent P Engine
+        env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python homologation_tap.py
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+        run: python Ghomologation_leads.py
+
+      - name: Rescue the Master Database (Artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Agent-P-Lead-Database
+          path: homologation_leads.csv
+          retention-days: 90
