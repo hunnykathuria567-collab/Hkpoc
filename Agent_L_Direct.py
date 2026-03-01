@@ -15,9 +15,9 @@ class LoanLead(BaseModel):
     contact_number: str = Field(description="Phone number. Put 'Not Listed' if unavailable.")
     email: str = Field(description="Email address. Put 'Not Listed' if unavailable.")
     office_address: str = Field(description="Physical address. Put 'Not Listed' if unavailable.")
-    proxy_signal: str = Field(description="Why we think they need money (e.g., NCLT notice, DRT, heavy factory expansion).")
-    capital_need: str = Field(description="Estimated need. MUST be above ₹1 Crore (No upper limit).")
-    the_play: str = Field(description="The strategic pitch: How Aditya Birla can clear their hurdle.")
+    proxy_signal: str = Field(description="Why we think they need money (e.g., won a big tender, heavy factory expansion).")
+    capital_need: str = Field(description="Estimated need. MUST be above ₹1 Crore. If exact amount is unknown but project is large, estimate it.")
+    the_play: str = Field(description="The strategic pitch: How Aditya Birla can fund their execution capital or CapEx.")
 
 class LeadRoster(BaseModel):
     leads: list[LoanLead] = Field(description="List of extracted direct SME loan leads.")
@@ -27,7 +27,7 @@ class ContactInfo(BaseModel):
     email: str = Field(description="Extracted email address, or 'Not Listed'.")
 
 # -------------------------------------------------------------------
-# 2. INGESTION 1: 350KM RADIUS DISTRESS & CAPEX OSINT
+# 2. INGESTION 1: 350KM RADIUS (B2B TENDERS & EXPANSIONS)
 # -------------------------------------------------------------------
 def fetch_loan_signals():
     api_key = os.environ.get("SERPER_API_KEY")
@@ -35,12 +35,12 @@ def fetch_loan_signals():
         print("⚠️ SERPER_API_KEY missing. Forcing 'Heartbeat' fallback mode for test...")
         return "" 
     
-    print("🌍 Phase 1: Scanning 350km Radius of Delhi for SME Distress & Expansions (>1Cr)...")
+    print("🌍 Phase 1: Scanning 350km Radius (Expansions, Tenders, Corporate Finance)...")
     url = "https://google.serper.dev/search"
     
-    # 350km Radius Payload: NCR, UP, Haryana, Punjab, Rajasthan, Uttarakhand corridors
+    # V5 Payload: Broad net for Execution Capital (Contracts) & CapEx (Factories)
     payload = json.dumps({
-      "q": "('debt restructuring' OR 'NCLT petition' OR 'SARFAESI' OR 'working capital crisis' OR 'factory expansion' OR 'new manufacturing unit') AND (SME OR MSME OR 'Pvt Ltd' OR 'manufacturing' OR 'textiles' OR 'EPC') AND ('Delhi' OR 'NCR' OR 'Haryana' OR 'Punjab' OR 'Rajasthan' OR 'UP' OR 'Jaipur' OR 'Chandigarh' OR 'Ludhiana' OR 'Agra' OR 'Dehradun') -'personal loan' -'mudra' -'credit card'",
+      "q": "('bags order' OR 'wins contract' OR 'setting up new facility' OR 'expanding capacity' OR 'project finance' OR 'debt syndication' OR 'fund raising') AND ('Pvt Ltd' OR 'Limited' OR 'manufacturing' OR 'EPC') AND ('Delhi' OR 'Haryana' OR 'Punjab' OR 'UP' OR 'Rajasthan' OR 'Chandigarh' OR 'Ludhiana' OR 'Jaipur' OR 'Noida' OR 'Gurugram') -'personal loan' -'mudra' -'credit card'",
       "num": 40, 
       "tbs": "qdr:m" # Last 30 days ONLY
     })
@@ -56,7 +56,7 @@ def fetch_loan_signals():
         return ""
 
 # -------------------------------------------------------------------
-# 3. INTELLIGENCE 1: >₹1CR NO UPPER LIMIT FILTER
+# 3. INTELLIGENCE 1: THE "ASSUME >1CR" FILTER
 # -------------------------------------------------------------------
 def process_leads_with_agent_l(raw_text):
     if not raw_text.strip(): return None
@@ -66,12 +66,12 @@ def process_leads_with_agent_l(raw_text):
     You are Agent L, a Lead Generation Specialist for High-Ticket Corporate Loans.
     Analyze this search data to find companies within a 350km radius of Delhi that have an URGENT need for capital.
     
-    STRICT STEP 2 NOISE FILTERS (MANDATORY):
-    1. TICKET SIZE: Drop any company needing under ₹1 Crore. THERE IS NO UPPER LIMIT. Even if a company has 500+ Cr debt, keep them, as we can fund a portion of it to clear immediate bottlenecks.
+    STRICT STEP 2 NOISE FILTERS:
+    1. TICKET SIZE (THE ASSUMPTION CLAUSE): Target is >₹1 Crore. If an article mentions a "Pvt Ltd" or "Limited" company setting up a factory, expanding capacity, or winning a major contract/tender, ASSUME the capital need is >₹1 Crore and KEEP THEM. Only drop them if it explicitly says the project is tiny (e.g., under 1 Crore). THERE IS NO UPPER LIMIT.
     2. RETAIL EXCLUSION: Drop any mention of individual loans, Mudra loans, gold loans, or personal debt. 
-    3. COLLATERAL FOCUS: Prioritize asset-heavy companies (Manufacturing, EPC, Heavy Machinery, Textiles) that can use property/machinery as collateral. Drop pure software startups.
+    3. TARGET FOCUS: Look for companies winning contracts (execution capital needed) or expanding factories (CapEx needed).
     
-    Extract the company, target person, proxy signal, capital need, and strategic pitch. 
+    Extract the company, target person, proxy signal, capital need (estimate it based on the project if not explicitly stated), and strategic pitch. 
     Return the data strictly in the JSON array.
     
     Raw Market Data:
@@ -133,7 +133,6 @@ def push_to_telegram(lead_data):
     chat_id = os.environ.get("TELEGRAM_CHAT_ID_L")
     if not bot_token or not chat_id: return
     
-    # Custom formatting if it's the Dummy Heartbeat Row
     if lead_data['company_name'] == "No New SME Potential Found":
         message = (
             f"🟢 *AGENT L: SYSTEM HEARTBEAT* 🟢\n\n"
@@ -163,7 +162,7 @@ def push_dummy_lead():
         "contact_number": "N/A",
         "email": "N/A",
         "office_address": "N/A",
-        "proxy_signal": "Engine ran successfully. Scanned 350km radius. No high-intent 1Cr+ distress/capex signals found today.",
+        "proxy_signal": "Engine ran successfully. Scanned 350km radius. No high-intent 1Cr+ capex/tender signals found today.",
         "capital_need": "N/A",
         "the_play": "N/A"
     }
@@ -175,7 +174,7 @@ def push_dummy_lead():
 # ORCHESTRATION 
 # -------------------------------------------------------------------
 if __name__ == "__main__":
-    print("=== INITIALIZING AGENT L (350KM DISTRESS ENGINE) ===\n")
+    print("=== INITIALIZING AGENT L (350KM V5 ENGINE) ===\n")
     raw_data = fetch_loan_signals()
     
     if raw_data:
