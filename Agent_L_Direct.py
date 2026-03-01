@@ -6,7 +6,7 @@ from google import genai
 from pydantic import BaseModel, Field
 
 # -------------------------------------------------------------------
-# 1. AGENT L: OUTPUT SCHEMAS
+# 1. AGENT L: OUTPUT SCHEMAS (NOW WITH URL & DATE)
 # -------------------------------------------------------------------
 class LoanLead(BaseModel):
     company_name: str = Field(description="Name of the Pvt Ltd / SME company.")
@@ -16,8 +16,10 @@ class LoanLead(BaseModel):
     email: str = Field(description="Email address. MUST put 'Not Listed'.")
     office_address: str = Field(description="Location mentioned in snippet. If none, put 'Delhi NCR Region'.")
     proxy_signal: str = Field(description="The exact reason from the snippet (e.g., won a tender, expanding).")
-    capital_need: str = Field(description="Estimate the need. If unknown, put 'Est. >₹1 Crore (Working Capital)'.")
+    capital_need: str = Field(description="Estimate the need. If unknown, put 'Est. >₹1 Crore (Working Capital/CapEx)'.")
     the_play: str = Field(description="A 1-sentence pitch for Aditya Birla based on the signal.")
+    source_link: str = Field(description="The exact URL of the news article or source.")
+    publish_date: str = Field(description="The date the article was published.")
 
 class LeadRoster(BaseModel):
     leads: list[LoanLead] = Field(description="List of extracted corporate leads.")
@@ -27,7 +29,7 @@ class ContactInfo(BaseModel):
     email: str = Field(description="Extracted email address, or 'Not Listed'.")
 
 # -------------------------------------------------------------------
-# 2. INGESTION 1: THE "CRORE" GUARANTEE PAYLOAD
+# 2. INGESTION 1: THE "CRORE" GUARANTEE + METADATA EXTRACTION
 # -------------------------------------------------------------------
 def fetch_loan_signals():
     api_key = os.environ.get("SERPER_API_KEY")
@@ -36,11 +38,11 @@ def fetch_loan_signals():
     print("🌍 Phase 1: Scanning for 'Crore' level Expansions & Tenders...")
     url = "https://google.serper.dev/search"
     
-    # V8 Payload: Forcing the word "Crore" or "Cr" to guarantee high ticket sizes in the snippets
+    # V10 Payload: Perfectly escaped to prevent Serper 400 errors
     payload = json.dumps({
-      "q": "(\"wins order\" OR \"bags contract\" OR \"expansion\" OR \"NCLT\" OR \"fund raising\") AND (\"Pvt Ltd\" OR \"Limited\") AND (Delhi OR Haryana OR UP OR Rajasthan OR Punjab) AND (Crore OR Cr)",
+      "q": "\"Pvt Ltd\" AND \"Crore\" AND (\"expansion\" OR \"wins order\" OR \"NCLT\") AND (\"Delhi\" OR \"Noida\" OR \"Gurugram\" OR \"Haryana\")",
       "num": 40, 
-      "tbs": "qdr:y" # Keeping 1 year open for the test flush
+      "tbs": "qdr:y" 
     })
     
     headers = {'X-API-KEY': api_key, 'Content-Type': 'application/json'}
@@ -48,7 +50,10 @@ def fetch_loan_signals():
         response = requests.post(url, headers=headers, data=payload)
         response.raise_for_status()
         results = response.json().get('organic', [])
-        return "\n".join([f"- {r.get('title')}: {r.get('snippet')}" for r in results])
+        
+        # CHANGED: Now feeding the Link and Date directly into the LLM prompt
+        raw_text = "\n".join([f"- Title: {r.get('title')}\n  Snippet: {r.get('snippet')}\n  Link: {r.get('link')}\n  Date: {r.get('date', 'Recent')}\n" for r in results])
+        return raw_text
     except Exception as e:
         print(f"Deep Search Error: {e}")
         return ""
@@ -58,19 +63,20 @@ def fetch_loan_signals():
 # -------------------------------------------------------------------
 def process_leads_with_agent_l(raw_text):
     if not raw_text.strip(): return None
-    print("🧠 Phase 1: AI Reading Snippets...")
+    print("🧠 Phase 1: AI Reading Snippets & Extracting URLs...")
     client = genai.Client() 
     prompt = f"""
     You are Agent L. You are reading short Google search snippets. 
     
     CRITICAL INSTRUCTIONS:
     1. Do NOT drop a company just because a person's name or email is missing. Use "Not Listed".
-    2. If a snippet mentions a company winning a contract/order, expanding a facility, or facing NCLT/distress, EXTRACT IT immediately.
+    2. If a snippet mentions a company winning a contract/order, expanding a facility, or facing distress, EXTRACT IT.
     3. Since we searched for "Crore", assume the capital need is >₹1 Crore for execution/capex.
+    4. Map the provided "Link" and "Date" directly to the source_link and publish_date fields.
     
     Extract every corporate entity you find that fits this criteria.
     
-    Raw Snippets:
+    Raw Market Data:
     {raw_text}
     """
     try:
@@ -95,8 +101,7 @@ def enrich_contact_info(company_name):
     api_key = os.environ.get("SERPER_API_KEY")
     if not api_key: return {"phone": "Not Listed", "email": "Not Listed"}
     url = "https://google.serper.dev/search"
-    # Simplified enrichment: Just search the company name + contact
-    payload = json.dumps({"q": f'"{company_name}" (email OR phone OR contact OR directory)', "num": 5})
+    payload = json.dumps({"q": f'"{company_name}" (email OR phone OR contact)', "num": 5})
     headers = {'X-API-KEY': api_key, 'Content-Type': 'application/json'}
     try:
         response = requests.post(url, headers=headers, data=payload)
@@ -139,7 +144,9 @@ def push_to_telegram(lead_data):
             f"📍 *Location:* {lead_data['office_address']}\n\n"
             f"📡 *Signal:* {lead_data['proxy_signal']}\n"
             f"💰 *Need:* {lead_data['capital_need']}\n"
-            f"♟️ *Play:* {lead_data['the_play']}"
+            f"♟️ *Play:* {lead_data['the_play']}\n\n"
+            f"🔗 *Source:* {lead_data['source_link']}\n"
+            f"📅 *Published:* {lead_data['publish_date']}"
         )
     try:
         requests.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", json={"chat_id": chat_id, "text": message})
@@ -151,7 +158,7 @@ def push_dummy_lead():
         "company_name": "No New SME Potential Found",
         "target_type": "N/A", "complete_name": "System Status: Active", "contact_number": "N/A", "email": "N/A", "office_address": "N/A",
         "proxy_signal": "Engine ran successfully. No snippet matched the >1Cr criteria today.",
-        "capital_need": "N/A", "the_play": "N/A"
+        "capital_need": "N/A", "the_play": "N/A", "source_link": "N/A", "publish_date": "N/A"
     }
     save_lead_to_csv(dummy_lead)
     push_to_telegram(dummy_lead)
@@ -160,7 +167,7 @@ def push_dummy_lead():
 # ORCHESTRATION 
 # -------------------------------------------------------------------
 if __name__ == "__main__":
-    print("=== INITIALIZING AGENT L (V8 - SNIPPET RESILIENT) ===\n")
+    print("=== INITIALIZING AGENT L (V10 - URL & DATE EXTRACTION) ===\n")
     raw_data = fetch_loan_signals()
     
     if raw_data:
