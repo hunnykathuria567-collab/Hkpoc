@@ -3,73 +3,86 @@ import pandas as pd
 import requests
 import json
 from datetime import datetime
+import re
 
 # --- 1. ARCHITECT SECRETS ---
 SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-def find_premium_targets(company_name):
-    """Targets high-level KDMs for Premium InMail outreach"""
+def google_search(query, num=5, tbs=""):
+    """Core search utility for recursive hunting"""
     url = "https://google.serper.dev/search"
-    # Specific dork to find 'Open' or 'Premium' looking profiles for top Finance KDMs
-    query = f"site:linkedin.com/in/ '{company_name}' (CFO OR 'Finance Director' OR 'VP Finance')"
     headers = {'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json'}
-    payload = json.dumps({"q": query, "num": 5})
-    
+    payload = json.dumps({"q": query, "num": num, "tbs": tbs})
     try:
-        res = requests.post(url, headers=headers, data=payload).json()
-        results = res.get('organic', [])
-        
-        target_list = []
-        for r in results[:3]: # Getting top 3 for better choice
-            name_title = r.get('title', 'Unknown').split(' - ')[0]
-            link = r.get('link', 'No Link')
-            target_list.append(f"{name_title} | URL: {link}")
-            
-        return target_list if target_list else ["Target Not Found", "", ""]
-    except:
-        return ["Search Error", "", ""]
+        res = requests.post(url, headers=headers, data=payload)
+        return res.json().get('organic', [])
+    except: return []
 
-def run_v9_1_premium_sniper():
-    """The Final Monday Morning Pipeline: Signal -> Premium Target Discovery"""
-    print("🚀 Initializing V9.1 Premium-Enhanced Sniper...")
-    search_url = "https://google.serper.dev/search"
-    queries = ["L1 bidder construction Delhi NCR 2026", "SME Noida factory expansion 2026", "Solar EPC India 2026"]
+def find_kdm_contact(company, name):
+    """STAGE 3: Recursive loop to find phone/email footprints"""
+    # Searching for specific contact strings: 'mobile', 'contact', 'direct', '@company.com'
+    query = f'"{name}" "{company}" (mobile OR contact OR "direct dial" OR email)'
+    results = google_search(query, num=3)
     
+    contacts = []
+    for r in results:
+        snippet = r.get('snippet', '')
+        # Regex to catch Indian mobile patterns or email formats
+        phones = re.findall(r'(\+91[\-\s]?)?[6-9]\d{9}', snippet)
+        emails = re.findall(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', snippet)
+        if phones: contacts.extend(phones)
+        if emails: contacts.extend(emails)
+    
+    return ", ".join(list(set(contacts))) if contacts else "Direct Desk / LinkedIn Only"
+
+def run_v11_recursive_engine():
+    """The Autonomous Pipeline: News -> Person -> Contact"""
+    print("🚀 Initializing V11.0 Recursive Intelligence Engine...")
+    
+    # --- STEP 1: SIGNAL ACQUISITION (15-Day Window) ---
+    queries = ["L1 bidder construction Delhi NCR 2026", "SME Noida expansion 2026", "Solar EPC India 2026"]
     unique_signals = {}
     for q in queries:
-        payload = json.dumps({"q": q, "num": 50, "tbs": "qdr:m"})
-        res = requests.post(search_url, headers={'X-API-KEY': SERPER_API_KEY}, data=payload).json()
-        for item in res.get('organic', []):
+        results = google_search(q, num=50, tbs="qdr:m")
+        for item in results:
             title = item.get('title', '')
+            # Dynamic Entity Extraction
             entity = title.split(' wins')[0].split(' secures')[0].split(' emerges')[0].strip()
             if entity.lower() not in unique_signals:
                 unique_signals[entity.lower()] = {"name": entity, "item": item}
 
-    final_leads = []
+    # --- STEP 2 & 3: PERSON & CONTACT DISCOVERY ---
+    final_db = []
     for company_id, data in unique_signals.items():
-        # DYNAMIC SEARCH FOR PREMIUM INMAIL TARGETS
-        targets = find_premium_targets(data['name'])
+        comp_name = data['name']
+        print(f"🔍 Hunting Strike Team for: {comp_name}")
         
-        # Ensure we have 3 slots for Column consistency
-        while len(targets) < 3: targets.append("N/A")
+        # Find the Person (KDM)
+        person_results = google_search(f"{comp_name} CFO Finance Head LinkedIn 2026", num=2)
+        kdm_name = person_results[0].get('title', 'Unknown').split(' - ')[0] if person_results else "N/A"
+        kdm_link = person_results[0].get('link', 'N/A') if person_results else "N/A"
         
-        final_leads.append({
-            "Entity": data['name'],
-            "InMail Target 1": targets[0],
-            "InMail Target 2": targets[1],
-            "InMail Target 3": targets[2],
+        # Find the Contact (Third Loop)
+        contact_info = "Researching..."
+        if kdm_name != "Unknown":
+            contact_info = find_kdm_contact(comp_name, kdm_name)
+        
+        final_db.append({
+            "Entity": comp_name,
+            "KDM Name": kdm_name,
+            "Contact Info (Dynamic)": contact_info, # THE WINNING COLUMN
+            "LinkedIn Profile": kdm_link,
             "Intent Signal": data['item'].get('snippet'),
-            "Source News": data['item'].get('link')
+            "Source": data['item'].get('link')
         })
 
-    # --- 2. EXPORT & DELIVERY ---
-    df = pd.DataFrame(final_leads)
-    df.to_excel("Agent_L_Premium_StrikeList.xlsx", index=False)
-    
-    with open("Agent_L_Premium_StrikeList.xlsx", 'rb') as f:
+    # --- 4. EXPORT & TELEGRAM ---
+    df = pd.DataFrame(final_db)
+    df.to_excel("Agent_L_Recursive_Master.xlsx", index=False)
+    with open("Agent_L_Recursive_Master.xlsx", 'rb') as f:
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument", 
                       data={'chat_id': TELEGRAM_CHAT_ID}, files={'document': f})
 
-run_v9_1_premium_sniper()
+run_v11_recursive_engine()
