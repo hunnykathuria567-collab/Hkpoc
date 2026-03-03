@@ -11,12 +11,10 @@ SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Initialize the NLP Engine 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 llm_model = genai.GenerativeModel('gemini-2.5-flash')
 
 def search_web(query, num=10, tbs="qdr:m"):
-    """Core Serper API Call"""
     url = "https://google.serper.dev/search"
     payload = json.dumps({"q": query, "num": num, "tbs": tbs})
     headers = {'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json'}
@@ -26,56 +24,65 @@ def search_web(query, num=10, tbs="qdr:m"):
     except:
         return []
 
+def clean_json_response(text):
+    """Strips markdown and forces the LLM output into a dictionary."""
+    try:
+        clean_text = text.replace('```json', '').replace('```', '').strip()
+        return json.loads(clean_text)
+    except json.JSONDecodeError:
+        return None
+
 def extract_entity_with_llm(headline, snippet):
-    """Uses Gemini to intelligently extract JUST the company name, ignoring the noise."""
+    """Forces Gemini to return ONLY a JSON object."""
     prompt = f"""
-    Extract ONLY the core Company Name from this news headline and snippet. 
-    Ignore project details, monetary values, and extra words.
+    Analyze this news snippet. If it's about a specific company winning a project or expanding, extract the core company name. 
+    If it's just a general industry report, government news, or you cannot find a specific company, return "INVALID".
     Headline: {headline}
     Snippet: {snippet}
-    Return strictly the company name and nothing else.
+    
+    You MUST return ONLY a valid JSON object in this exact format, with no other text:
+    {{"company": "Extracted Name or INVALID"}}
     """
     try:
         response = llm_model.generate_content(prompt)
-        return response.text.strip().replace('*', '').replace('"', '')
+        parsed = clean_json_response(response.text)
+        if parsed and parsed.get("company") != "INVALID":
+            return parsed.get("company").strip()
+        return None
     except:
-        return headline[:20]
+        return None
 
 def hunt_kdm_with_llm(company_name):
-    """Searches LinkedIn specifically and uses Gemini to find the actual human."""
-    # Strict dorking for LinkedIn Profiles only
+    """Forces strict JSON parsing for the LinkedIn hunt."""
     query = f"site:linkedin.com/in/ \"{company_name}\" (CFO OR \"Head of Finance\" OR \"Director Finance\")"
     results = search_web(query, num=3, tbs="")
     
     if not results:
-        return "No LinkedIn Profile Found", "N/A", "N/A"
+        return "Manual Research", "N/A", "N/A"
         
-    # Combine top results for the LLM to read
-    context = "\n".join([f"Title: {r.get('title')} | Link: {r.get('link')} | Snippet: {r.get('snippet')}" for r in results])
+    context = "\n".join([f"Title: {r.get('title')} | Link: {r.get('link')}" for r in results])
     
     prompt = f"""
-    You are an executive researcher. Read the following LinkedIn search results for the company '{company_name}'.
-    Identify the best human match for the Finance Leader/CFO.
-    Return the result strictly in this format: 
-    Name | Exact Job Title | LinkedIn URL
-    If no clear human name is found, return: "Manual Research Needed | N/A | N/A"
+    Analyze these LinkedIn search results for '{company_name}'. Find the best match for the Finance Leader/CFO.
+    
+    You MUST return ONLY a valid JSON object in this exact format. If no human is found, use "N/A" for all values.
+    {{"name": "Person Name", "title": "Exact Job Title", "url": "LinkedIn URL"}}
     
     Data:
     {context}
     """
     try:
         response = llm_model.generate_content(prompt)
-        ans = response.text.strip().split('|')
-        if len(ans) >= 3:
-            return ans[0].strip(), ans[1].strip(), ans[2].strip()
-        return ans[0], "Title Unknown", "Link Unknown"
+        parsed = clean_json_response(response.text)
+        if parsed:
+            return parsed.get("name", "N/A"), parsed.get("title", "N/A"), parsed.get("url", "N/A")
+        return "Parsing Failed", "N/A", "N/A"
     except:
-        return "LLM Parsing Error", "N/A", "N/A"
+        return "LLM Error", "N/A", "N/A"
 
 def execute_agent_p_pipeline():
-    print("🚀 Initializing Agent P (NLP-to-Insights Pipeline)...")
+    print("🚀 Initializing Agent P V14.0 (JSON-Enforced)...")
     
-    # --- PHASE 1: SIGNAL ACQUISITION ---
     queries = [
         "L1 bidder construction Delhi NCR 2026", 
         "SME manufacturing Noida factory expansion 2026",
@@ -84,9 +91,8 @@ def execute_agent_p_pipeline():
     
     raw_signals = []
     for q in queries:
-        raw_signals.extend(search_web(q, num=15)) # Kept to 15 per query to respect LLM rate limits
+        raw_signals.extend(search_web(q, num=15))
         
-    # --- PHASE 2: NLP PROCESSING ---
     processed_entities = set()
     final_database = []
     
@@ -98,12 +104,12 @@ def execute_agent_p_pipeline():
         # 1. Clean the Entity
         clean_company = extract_entity_with_llm(headline, snippet)
         
-        # Deduplication based on LLM's clean output
-        if clean_company.lower() in processed_entities or len(clean_company) < 3:
+        # Skip garbage, Wikipedia, government portals, or duplicates
+        if not clean_company or clean_company.lower() in processed_entities or len(clean_company) < 3:
             continue
             
         processed_entities.add(clean_company.lower())
-        print(f"🔍 NLP Extracted Target: {clean_company}. Hunting KDMs...")
+        print(f"✅ Verified Target: {clean_company}. Hunting KDMs...")
         
         # 2. Hunt the KDM
         kdm_name, kdm_title, kdm_link = hunt_kdm_with_llm(clean_company)
@@ -117,11 +123,10 @@ def execute_agent_p_pipeline():
             "Source URL": url,
             "Date": item.get('date', datetime.now().strftime("%Y-%m-%d"))
         })
-        time.sleep(1) # Prevent LLM API throttling
+        time.sleep(1.5) # Prevent LLM throttling
 
-    # --- PHASE 3: DELIVERY ---
     df = pd.DataFrame(final_database)
-    output_file = "Agent_P_Intelligence.xlsx"
+    output_file = "Agent_P_JSON_Intelligence.xlsx"
     df.to_excel(output_file, index=False)
     
     with open(output_file, 'rb') as f:
