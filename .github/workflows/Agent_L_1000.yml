@@ -1,20 +1,20 @@
-name: Agent1000 L - Corporate Loan Engine
+name: Agent P Intelligence Pipeline
 
 on:
-  schedule:
-    # Runs at 12:00 PM UTC daily
-    - cron: '00 12 * * *'
-  workflow_dispatch:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Allows you to manually trigger it from the GitHub app
 
 jobs:
-  execute_loan_hunting:
+  build-and-run:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
@@ -22,17 +22,14 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          # Added pandas and openpyxl for the Excel/Bulk strategy
-          pip install requests google-genai pydantic pandas openpyxl
+          pip install pandas requests openpyxl google-generativeai
 
-      - name: Run Agent L Direct Client Engine
+      - name: Run Agent P Intelligence Script
         env:
-          # Using your standard Homologation secrets for phone delivery
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
-        # Ensure this matches the filename of your Python script
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python Agent_L_1000.py
 
       - name: Rescue the Master Database (Artifact)
